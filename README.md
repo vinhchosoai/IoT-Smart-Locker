@@ -1,41 +1,56 @@
-# Hệ thống Tủ đồ Thông minh tích hợp Nhận diện Khuôn mặt (IoT Smart Locker)
+# IoT Smart Locker System with Face Recognition
 
-Dự án hiện thực hóa đầy đủ báo cáo thiết kế **Hệ thống Tủ đồ Thông minh tích hợp Nhận diện Khuôn mặt (IoT Smart Locker)** gồm:
-- **Backend Server (FastAPI + MySQL 8.0 + OpenCV YuNet / YOLOv5-face + SFace 128-D + paho-mqtt)**
-- **Kiosk Khách hàng (Streamlit - Port 8501)**: Chụp ảnh khuôn mặt (`st.camera_input` hoặc tải ảnh / chọn ảnh mẫu kiểm thử) để gửi đồ (`FR-01`), nhận đồ (`FR-02`) và gọi nhân viên hỗ trợ.
-- **Admin/Staff Dashboard (Streamlit - Port 8502)**: Đăng nhập JWT, màn hình Home gồm 2 nút lớn (`Locker System` và `Staff Management`), giám sát trạng thái tủ thời gian thực, thêm/sửa/xóa hộc tủ (`FR-03`, trạng thái `AVAILABLE` / `OCCUPIED` / `MAINTENANCE`), mở tủ khẩn cấp (`FR-08`), tra cứu nhật ký (`FR-05`), bảng chỉ tiêu đánh giá hệ thống (`Mục 7.4`) và quản lý nhân viên (`FR-04` - chỉ dành cho `ADMIN`).
-- **Firmware ESP32 & Mô phỏng Wokwi (`firmware/`)**: Mô hình 1 ESP32 = 1 ngăn tủ (`#define LOCKER_ID X`), tự ngắt relay sau 5 giây bằng `millis()` (`FR-06`, `TC-06`), cảnh báo cửa mở quá 30 giây (`DOOR_OPEN_TIMEOUT`, `FR-07`, `TC-07`), gửi heartbeat mỗi 10 giây và tương thích đồng thời chuẩn JSON tại Mục 3.4 báo cáo.
+An end-to-end Smart Locker system integrating facial biometric authentication, a FastAPI + MySQL backend, Streamlit web interfaces (Customer Kiosk and Admin/Staff Dashboard), and ESP32 IoT firmware with Wokwi simulation.
 
 ---
 
-## 1. Cấu trúc thư mục
+## 1. Key Features & Architecture
+
+- **Backend Server (FastAPI + MySQL 8.0 + OpenCV + paho-mqtt):**
+  - **AI Face Pipeline:** Uses **OpenCV YuNet** (or optional **YOLOv5-face ONNX**) for face detection, **checkLiveness** (brightness and Laplacian blur checks), and **OpenCV SFace** for 128-dimensional L2-normalized embeddings matched via **Cosine Distance** (`<= 0.45`).
+  - **1 ESP32 = 1 Locker Model:** Each ESP32 controls a single locker identified by `#define LOCKER_ID X`, communicating over MQTT (`iot_smartlocker_2026/locker/{id}/command` and `.../status`) with 10-second heartbeats and Section 3.4 JSON compatibility.
+  - **Transaction Safety:** Row-level locking (`SELECT ... FOR UPDATE`) on `AVAILABLE` and `online = 1` lockers, duplicate active-session prevention (`HTTP 409`), and automatic database rollback (`HTTP 503`) if MQTT publishing fails.
+  - **Role-Based Access Control (RBAC):** JWT + bcrypt authentication with `ADMIN` and `STAFF` roles. `STAFF` accounts are restricted from `Staff Management` (`/api/users`), creating/deleting lockers, and `Action Logs` (`/api/logs`, `HTTP 403`).
+- **Customer Kiosk (Streamlit - Port 8501):**
+  - Supports **Deposit (Check-in)** and **Retrieve (Check-out)** via `st.camera_input` (plus image upload and sample face selection for testing without a webcam).
+  - Includes a **Call Staff** support form that attaches an active support request bar directly to the selected locker on the Dashboard (auto-clears after 5 minutes or when a new user checks into that locker).
+- **Admin / Staff Dashboard (Streamlit - Port 8502):**
+  - JWT login leading to a two-module Home screen (**Locker System** and **Staff Management**).
+  - Real-time locker grid (`AVAILABLE`, `OCCUPIED`, `MAINTENANCE`, `ONLINE`/`OFFLINE`, door/lock state, `DOOR_OPEN_TIMEOUT` alerts, per-locker support request banner), emergency open, locker CRUD, and `ADMIN`-only Action Logs & Staff CRUD.
+- **ESP32 Firmware & Wokwi Simulation (`firmware/`):**
+  - Non-blocking `millis()` timer logic: relay on `GPIO 26` auto-locks after 5 seconds, door switch on `GPIO 32` (`INPUT_PULLUP`) triggers buzzer (`GPIO 15`) and `DOOR_OPEN_TIMEOUT` alert after 30 seconds, plus I2C LCD 1602 (`GPIO 21`/`22`).
+
+---
+
+## 2. Project Structure
 
 ```text
 .
 ├── .env.example
-├── .env
 ├── .gitignore
 ├── docker-compose.yml
+├── pyrightconfig.json
 ├── start_all.ps1
+├── README.md
 ├── backend/
 │   ├── requirements.txt
 │   ├── download_models.py
 │   ├── seed.py
-│   ├── models/                # Chua model YuNet / YOLOv5-face & SFace ONNX
-│   ├── storage/faces/         # Luu anh khuon mat theo {session_id}.jpg
+│   ├── models/                # YuNet / YOLOv5-face & SFace ONNX models
+│   ├── storage/faces/         # Stored check-in face images ({session_id}.jpg)
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── config.py
 │   │   ├── db.py
-│   │   ├── models.py          # 4 bang chuan hoa: users, lockers, sessions, action_logs
+│   │   ├── models.py          # 4 tables: users, lockers, sessions, action_logs
 │   │   ├── schemas.py
 │   │   ├── auth.py            # JWT + bcrypt + RBAC (ADMIN / STAFF)
-│   │   ├── face.py            # FaceRecognitionService (checkLiveness + 128-D + Cosine <= 0.45)
-│   │   ├── mqtt_client.py     # Tuong thich iot_smartlocker_2026/locker/{id}/* va Muc 3.4
+│   │   ├── face.py            # FaceRecognitionService (liveness + 128-D + cosine)
+│   │   ├── mqtt_client.py     # paho-mqtt background client
 │   │   ├── services/locker_service.py
 │   │   └── routers/{auth,kiosk,lockers,users,logs}.py
 │   └── tests/
-│       ├── samples/           # Anh khuon mat mau kiem thu E2E
+│       ├── samples/           # Sample face images for E2E testing
 │       └── test_smart_locker.py
 ├── kiosk/app.py
 ├── dashboard/app.py
@@ -50,45 +65,58 @@ Dự án hiện thực hóa đầy đủ báo cáo thiết kế **Hệ thống T
 
 ---
 
-## 2. Hướng dẫn Cài đặt & Khởi chạy
+## 3. Setup & Running
 
-### Bước 1: Tạo môi trường ảo Python `.venv` và cài đặt thư viện
+### Step 1: Create `.env` and Python Virtual Environment
 ```powershell
+Copy-Item .env.example .env
 uv venv .venv --python python3.12
 uv pip install --python .venv\Scripts\python.exe -r backend\requirements.txt
 ```
 
-### Bước 2: Tải / chuẩn bị model AI ONNX
+### Step 2: Download / Prepare AI ONNX Models
 ```powershell
 .venv\Scripts\python.exe backend\download_models.py
 ```
 
-### Bước 3: Khởi động hệ thống
-Chạy script tự động trên Windows (tự khởi động MySQL 8.0 cổng `3306`, đồng bộ schema, seed dữ liệu mẫu và bật Backend `8000`, Kiosk `8501`, Dashboard `8502`):
-```powershell
-powershell -ExecutionPolicy Bypass -File .\start_all.ps1
-```
+### Step 3: Start MySQL and Launch the System
+- **Option A — One-Click Windows Script** (starts local MySQL 8.0 on port `3306`, seeds sample data, and launches Backend `8000`, Kiosk `8501`, and Dashboard `8502`):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\start_all.ps1
+  ```
+- **Option B — Docker + Manual Startup:**
+  ```powershell
+  docker compose up -d
+  .venv\Scripts\python.exe backend\seed.py
+  .venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+  .venv\Scripts\python.exe -m streamlit run kiosk\app.py --server.port 8501 --server.headless true
+  .venv\Scripts\python.exe -m streamlit run dashboard\app.py --server.port 8502 --server.headless true
+  ```
 
-### Tài khoản mặc định
-- **ADMIN:** `admin` / `admin123`
-- **STAFF:** `staff` / `staff123`
+### Default Credentials & URLs
+- **Customer Kiosk:** `http://127.0.0.1:8501`
+- **Admin / Staff Dashboard:** `http://127.0.0.1:8502`
+  - `ADMIN`: `admin` / `admin123`
+  - `STAFF`: `staff` / `staff123`
+- **Backend API Docs:** `http://127.0.0.1:8000/docs`
 
 ---
 
-## 3. Mở rộng thêm ngăn tủ (1 ESP32 = 1 Ngăn tủ)
+## 4. Scaling Up: Adding Another Locker
 
-1. Mở `firmware/src/main.cpp` (hoặc `firmware/sketch.ino`), đổi `#define LOCKER_ID 2`.
-2. Nạp firmware vào mạch ESP32 mới (hoặc mở tab mô phỏng Wokwi mới).
-3. Đăng ký tủ mới trên Dashboard (`Thêm ngăn tủ mới` với quyền `ADMIN`) hoặc qua CLI:
+1. Open `firmware/src/main.cpp` (or `firmware/sketch.ino`) and set `#define LOCKER_ID 2`.
+2. Update `WIFI_SSID` / `WIFI_PASSWORD` if flashing to physical ESP32 hardware, then flash (`pio run -d firmware -t upload`) or run a second Wokwi instance.
+3. Register the new locker as `ADMIN` from the Dashboard (`Add new locker`) or via CLI:
    ```powershell
    .venv\Scripts\python.exe backend\seed.py --add-locker 2
    ```
 
 ---
 
-## 4. Biên dịch Firmware ESP32 & Chạy kiểm thử tự động
+## 5. Firmware Build & Automated Tests
 
 ```powershell
 pio run -d firmware
+
 .venv\Scripts\pytest.exe backend\tests\test_smart_locker.py -v
 ```
