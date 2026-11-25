@@ -1,0 +1,59 @@
+# --- Bao mat & Cau hinh moi truong ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+
+# --- Du lieu nhay cam (Anh khuon mat nguoi dung) & Storage ---
+backend/storage/faces/*
+!backend/storage/faces/.gitkeep
+
+# --- Model AI dung luong lon (tai lai qua backend/download_models.py) ---
+backend/models/*.onnx
+!backend/models/.gitkeep
+
+# --- Co so du lieu & Log cuc bo ---
+mysql_data/
+.mysql_data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# --- Moi truong ao & Cache Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# --- Firmware ESP32 (PlatformIO / Wokwi build & clangd) ---
+.pio/
+firmware/.pio/
+firmware/.cache/
+firmware/compile_commands.json
+firmware/.clangd
+.clangd
+
+# --- IDE & He dieu hanh ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+desktop.ini
